@@ -1,5 +1,7 @@
 import numpy as np 
 import os 
+import csv 
+import pandas as pd
 
 import torch
 import torch.nn as nn 
@@ -13,7 +15,7 @@ from tensorboardX import SummaryWriter
 
 from emotic import Emotic 
 from emotic_dataset import Emotic_PreDataset
-from loss_classes import DiscreteLoss, ContinuousLoss_SL1, ContinuousLoss_L2
+from loss import DiscreteLoss, ContinuousLoss_SL1, ContinuousLoss_L2
 from prepare_models import prep_models
 from test import test_data
 
@@ -131,6 +133,17 @@ def train_data(opt, scheduler, models, device, train_loader, val_loader, disc_lo
     torch.save(model_body, os.path.join(model_path, 'model_body1.pth'))
     print ('saved models')
 
+def csv_to_df(csvfile):
+    outlist = []
+    with open(csvfile, mode='r') as csv_file:
+        spamreader = csv.DictReader(csv_file)
+        for row in spamreader:
+            outlist.append(row)
+    df = pd.DataFrame(outlist)
+    return df
+
+def df_index_list(df, col, val):
+    return df.index[df[col] == val].tolist()
 
 def train_emotic(result_path, model_path, train_log_path, val_log_path, ind2cat, ind2vad, context_norm, body_norm, args):
     ''' Prepare dataset, dataloders, models. 
@@ -149,11 +162,24 @@ def train_emotic(result_path, model_path, train_log_path, val_log_path, ind2cat,
     train_body = np.load(os.path.join(args.data_path, 'train_body_arr.npy'))
     train_cat = np.load(os.path.join(args.data_path, 'train_cat_arr.npy'))
     train_cont = np.load(os.path.join(args.data_path, 'train_cont_arr.npy'))
+    train_csv_file = os.path.join(args.data_path, 'train.csv')
+    train_df = csv_to_df(train_csv_file)
 
     val_context = np.load(os.path.join(args.data_path, 'val_context_arr.npy'))
     val_body = np.load(os.path.join(args.data_path, 'val_body_arr.npy'))
     val_cat = np.load(os.path.join(args.data_path, 'val_cat_arr.npy'))
     val_cont = np.load(os.path.join(args.data_path, 'val_cont_arr.npy'))
+    # filter by column value
+    if args.filter_col and args.filter_val:
+        val_csv_file = os.path.join(args.data_path, 'val.csv')
+        val_df = csv_to_df(val_csv_file)
+        val_df_idx = df_index_list(val_df, args.filter_col, args.filter_val)
+        val_context = val_context[val_df_idx]
+        val_body = val_body[val_df_idx]
+        val_cat = val_cat[val_df_idx]
+        val_cont = val_cont[val_df_idx]
+        print(f'Filter using {args.filter_col} of {args.filter_val} with new testdata shape {len(val_context)}')
+
 
     print ('train ', 'context ', train_context.shape, 'body', train_body.shape, 'cat ', train_cat.shape, 'cont', train_cont.shape)
     print ('val ', 'context ', val_context.shape, 'body', val_body.shape, 'cat ', val_cat.shape, 'cont', val_cont.shape)

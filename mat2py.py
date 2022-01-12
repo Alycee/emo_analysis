@@ -4,10 +4,11 @@ import cv2
 import numpy as np 
 import os 
 from scipy.io import loadmat 
-
+import json
+import pdb
 
 class emotic_train:
-    def __init__(self, filename, folder, image_size, person):
+    def __init__(self, filename, folder, image_size, person, anno):
         self.filename = filename
         self.folder = folder
         self.im_size = []
@@ -16,6 +17,7 @@ class emotic_train:
         self.cont = []
         self.gender = person[3][0]
         self.age = person[4][0]
+        self.anno = anno
         self.cat_annotators = 0
         self.cont_annotators = 0
         self.set_imsize(image_size)
@@ -60,7 +62,7 @@ class emotic_train:
                 break
 
 class emotic_test:
-    def __init__(self, filename, folder, image_size, person):
+    def __init__(self, filename, folder, image_size, person, anno):
         self.filename = filename
         self.folder = folder
         self.im_size = []
@@ -73,6 +75,7 @@ class emotic_test:
         self.comb_cont = []
         self.gender = person[5][0]
         self.age = person[6][0]
+        self.anno = anno
 
         self.set_imsize(image_size)
         self.set_bbox(person[0])
@@ -137,6 +140,16 @@ class emotic_test:
                 self.cont_annotators = 0
                 break
 
+def convert_list_to_dict(json_file):
+  with open(json_file, 'r') as f:
+    img_data = json.load(f)
+  return img_data
+
+def compare_bbox(bbox1, bbox2):
+  for i in range(4):
+    if bbox1[i] != bbox2[i]:
+      return False
+    return True
 
 def cat_to_one_hot(y_cat):
     '''
@@ -149,7 +162,7 @@ def cat_to_one_hot(y_cat):
         one_hot_cat[cat2ind[em]] = 1
     return one_hot_cat
 
-def prepare_data(data_mat, data_path_src, save_dir, dataset_type='train', generate_npy=False, debug_mode=False):
+def prepare_data(anno_dict, data_mat, data_path_src, save_dir, dataset_type='train', generate_npy=False, debug_mode=False):
   '''
   Prepare csv files and save preprocessed data in npy files. 
   :param data_mat: Mat data object for a label. 
@@ -173,10 +186,16 @@ def prepare_data(data_mat, data_path_src, save_dir, dataset_type='train', genera
   for ex_idx, ex in enumerate(data_mat[0]):
     nop = len(ex[4][0])
     for person in range(nop):
+      # get annotation data
+      bbox_name = ex[4][0][person][0][0].copy()
+      bbox_name = [max(int(i), 1) for i in bbox_name]
+      name = ex[0][0] + ''.join(str(int(i)) for i in bbox_name)
+      anno_item = anno_dict[dataset_type][name]
+
       if dataset_type == 'train':
-        et = emotic_train(ex[0][0],ex[1][0],ex[2],ex[4][0][person])
+        et = emotic_train(ex[0][0],ex[1][0],ex[2],ex[4][0][person], anno_item)
       else:
-        et = emotic_test(ex[0][0],ex[1][0],ex[2],ex[4][0][person])
+        et = emotic_test(ex[0][0],ex[1][0],ex[2],ex[4][0][person], anno_item)
       try:
         image_path = os.path.join(data_path_src,et.folder,et.filename)
         if not os.path.exists(image_path):
@@ -223,13 +242,13 @@ def prepare_data(data_mat, data_path_src, save_dir, dataset_type='train', genera
   csv_path = os.path.join(save_dir, "%s.csv" %(dataset_type))
   with open(csv_path, 'w') as csvfile:
     filewriter = csv.writer(csvfile, delimiter=',', dialect='excel')
-    row = ['Index', 'Folder', 'Filename', 'Image Size', 'BBox', 'Categorical_Labels', 'Continuous_Labels', 'Gender', 'Age']
+    row = ['Index', 'Folder', 'Filename', 'Image Size', 'BBox', 'Categorical_Labels', 'Continuous_Labels', 'Gender', 'Age', 'Anno_Gender', 'Anno_Skin_Color']
     filewriter.writerow(row)
     for idx, ex in enumerate(data_set):
         if dataset_type == 'train':
-            row = [idx, ex.folder, ex.filename, ex.im_size, ex.bbox, ex.cat, ex.cont, ex.gender, ex.age]
+            row = [idx, ex.folder, ex.filename, ex.im_size, ex.bbox, ex.cat, ex.cont, ex.gender, ex.age, ex.anno['gender'], ex.anno['skin color']]
         else:
-            row = [idx, ex.folder, ex.filename, ex.im_size, ex.bbox, ex.comb_cat, ex.comb_cont, ex.gender, ex.age]
+            row = [idx, ex.folder, ex.filename, ex.im_size, ex.bbox, ex.comb_cat, ex.comb_cont, ex.gender, ex.age, ex.anno['gender'], ex.anno['skin color']]
         filewriter.writerow(row)
   print ('wrote file ', csv_path)
 
@@ -260,8 +279,8 @@ def parse_args():
   
 if __name__ == '__main__':
     args = parse_args()
-    ann_path_src = os.path.join(args.data_dir, 'Annotations','Annotations.mat')
-    data_path_src = os.path.join(args.data_dir, 'emotic')
+    ann_path_src = os.path.join(args.data_dir, 'annotations','Annotations.mat')
+    data_path_src = os.path.join(args.data_dir, 'images')
     save_path = os.path.join(args.data_dir, args.save_dir_name)
     if not os.path.exists(save_path):
       os.makedirs(save_path)
@@ -277,6 +296,24 @@ if __name__ == '__main__':
     
     print ('loading Annotations')
     mat = loadmat(ann_path_src)
+    json_file = os.path.join(args.data_dir, 'annotations','all_data_anno.json')
+    anno_data = convert_list_to_dict(json_file)
+    anno_dict = {'train':{}, 'test':{}, 'val':{}}
+    count = {'train':0, 'test':0, 'val':0} 
+    for i,item in enumerate(anno_data):
+      if i < 7280:
+        part = 'test'
+      elif i>= 7280 and i<30986:
+        part = 'train'
+      else:
+        part = 'val'
+      bbox = [max(int(i), 1) for i in item['body_bbox']]
+      key = item['filename'] + ''.join(str(i) for i in bbox)
+      if key not in anno_dict[part]:
+        anno_dict[part][key] = item
+      else:
+        count[part] += 1
+    print(count)
     if args.label.lower() == 'all':
       labels = ['train', 'val', 'test']
     else:
@@ -284,4 +321,4 @@ if __name__ == '__main__':
     for label in labels:
       data_mat = mat[label]
       print ('starting label ', label)
-      prepare_data(data_mat, data_path_src, save_path, dataset_type=label, generate_npy=args.generate_npy, debug_mode=args.debug_mode)
+      prepare_data(anno_dict, data_mat, data_path_src, save_path, dataset_type=label, generate_npy=args.generate_npy, debug_mode=args.debug_mode)

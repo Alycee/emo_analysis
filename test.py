@@ -3,6 +3,9 @@ import os
 import scipy.io
 from sklearn.metrics import average_precision_score, precision_recall_curve
 
+import csv 
+import pandas as pd
+
 import torch 
 import torch.nn as nn 
 from torch.utils.data import DataLoader 
@@ -118,6 +121,17 @@ def test_data(models, device, data_loader, ind2cat, ind2vad, num_images, result_
     np.save(os.path.join(result_dir, '%s_thresholds.npy' %(test_type)), thresholds)
     print ('saved thresholds')
 
+def csv_to_df(csvfile):
+    outlist = []
+    with open(csvfile, mode='r') as csv_file:
+        spamreader = csv.DictReader(csv_file)
+        for row in spamreader:
+            outlist.append(row)
+    df = pd.DataFrame(outlist)
+    return df
+
+def df_index_list(df, col, val):
+    return df.index[df[col] == val].tolist()
 
 def test_emotic(result_path, model_path, ind2cat, ind2vad, context_norm, body_norm, args):
     ''' Prepare test data and test models on the same.
@@ -141,6 +155,16 @@ def test_emotic(result_path, model_path, ind2cat, ind2vad, context_norm, body_no
     test_cat = np.load(os.path.join(args.data_path, 'test_cat_arr.npy'))
     test_cont = np.load(os.path.join(args.data_path, 'test_cont_arr.npy'))
     print ('test ', 'context ', test_context.shape, 'body', test_body.shape, 'cat ', test_cat.shape, 'cont', test_cont.shape)
+    # filter by column value
+    if args.filter_col and args.filter_val:
+        test_csv_file = os.path.join(args.data_path, 'test.csv')
+        test_df = csv_to_df(test_csv_file)
+        test_df_idx = df_index_list(test_df, args.filter_col, args.filter_val)
+        test_context = test_context[test_df_idx]
+        test_body = test_body[test_df_idx]
+        test_cat = test_cat[test_df_idx]
+        test_cont = test_cont[test_df_idx]
+        print(f'Filter using {args.filter_col} of {args.filter_val} with new testdata shape {len(test_context)}')
 
     # Initialize Dataset and DataLoader 
     test_transform = transforms.Compose([transforms.ToPILImage(),transforms.ToTensor()])
